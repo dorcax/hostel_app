@@ -2,10 +2,9 @@ import { Controller,Post,Body ,Res,Req, BadRequestException, UseGuards, Unauthor
 import { AuthService } from './auth.service';
 import { CreateSignUpDto } from '../auth/dto/CreateSignUpDto';
 import { OtpService } from '../otp/otp.service';
-import { otpDto } from '../otp/dto/otpDto';
 import { LoginDto } from './dto/loginDto';
-import { resendVerificationDto } from './dto/resendVerificationDto';
-import { AuthGuard } from '../guards/auth.guards';
+import { resendVerificationDto } from '../otp/dto/resendVerificationDto';
+import { VerifyOtpDto } from '../otp/dto/verifyDto';
 
 
 
@@ -18,68 +17,44 @@ export class AuthController {
   // todo post signup
   @Post("signup")
   async signUp(@Body() signUpDto:CreateSignUpDto,@Res() res){
-       return this.authService.createUser(signUpDto,res)
+       try {
+        const result =await this.authService.createUser(signUpDto,res)
+       res.json(result)
+       } catch (error) {
+        res.status(400).json({ message: error.message });
+       }
   }
 
 
   // verify otp
-  @UseGuards(AuthGuard)
   @Post("verify-otp")
-  async verifyOtp(@Body() body:otpDto,@Req() req,@Res() res){
-    const {otpCode} =body
-    const user =req.user.id
-    if (!user) {
-      throw new BadRequestException('User ID not found');
-    }
-    const otpIsValid =await this.otpService.verifyOtpCode(otpCode,user)
-    if(!otpIsValid){
-      throw new BadRequestException("invalid otp")
-    }
-    // user marked as verify
-     const verifiedUser=await this.authService.verifyUser(user)
-      return res.status(200).json({message:"user verified successfully"})
+  async verifyOtp(@Body() body:VerifyOtpDto,@Req() req,@Res() res){
+  try {
+    const {otpCode} = body
+   
+    const result =await this.authService.verifyUser(otpCode)
+    res.json(result); 
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+      
 
   }
 
   // resend verification code 
-  @UseGuards(AuthGuard)
   @Post("resendverificationcode")
   async resendVerification(@Body() body:resendVerificationDto, @Req() req,@Res() res){
     const{email}=body
-    const userId=req.user.id
-    // check for user
-
-    const user =await this.authService.getUser(userId)
-    if(!user) {
-      throw new UnauthorizedException('Invalid details');
-    }
-    const Otp=await this.otpService.getOtp(userId)
-    if(Otp && new Date()< Otp.expiry){
-
-      return res.status(400).json({
-        message: 'OTP code is still valid, please use the existing code',
-      });
-    }
-    if(Otp){
-      return await this.otpService.deleteOtp(userId)
-    }
-      
-    
-     
-   
-   const sendOtp= await this.otpService.sendOtp(userId,res)
-   return res.status(200).json({
-    message: 'New OTP sent successfully',
-  });
-
-  }
+    const result=await this.authService.resendOtp(email,res)
+    res.json(result)
+   }
 
   // user login
-@UseGuards(AuthGuard)
+
 @Post("login")
 async loginUser(@Body() body:LoginDto, @Res() res){
-  const user = this.authService.login(body)
-  return res.status(200).json({message:"user logged in"})
+  const user = await this.authService.login(body)
+   res.json(user)
 
 }
 }

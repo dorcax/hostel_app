@@ -5,6 +5,7 @@ import * as bcrypt from "bcrypt";
 import { OtpService } from '../otp/otp.service';
 import { LoginDto } from './dto/loginDto';
 import { JwtService } from '@nestjs/jwt';
+
 @Injectable()
 export class AuthService {
     constructor(private prisma:PrismaService,
@@ -12,9 +13,11 @@ export class AuthService {
         private readonly jwtService:JwtService
     ){}
 
-    async createUser(signUpDto:Prisma.UserCreateInput,res): Promise<{ message: string; token: string }>{
+    async createUser(signUpDto:Prisma.UserCreateInput,res){
+  
         // check if email exist
-      try {  const emailExist =await this.prisma.user.findUnique({
+      try {  
+        const emailExist =await this.prisma.user.findUnique({
         where:{
             email:signUpDto.email
         }
@@ -33,16 +36,11 @@ export class AuthService {
             password:hashPassword
         }
     })
+    const userId =newUser.id
      // send user otp to the user email
-    const otpResponse= await this.otpService.sendOtp(newUser.id,res)
-    const token= this.jwtService.sign({id:newUser.id},{expiresIn:"3h"})
-    console.log(token)
-
-    // return  { message: 'User registered, OTP sent to email',token }
-    return {
-        message: `User registered, ${otpResponse.message}`,
-        token
-    };
+      await this.otpService.sendOtp(userId,res)
+      console.log(newUser)
+    return { message: "User registered"};
    
       } catch (error) {
         console.log(error)
@@ -58,25 +56,83 @@ export class AuthService {
 
 
     // verify user
-    async verifyUser(userId:number){
-        // find user
+    async verifyUser(otpCode:string){
+
       try {
+        const verifyOtp  = await this.otpService.verifyOtpCode(otpCode)
+      console.log("otpuser",verifyOtp)
         const userExist =await this.prisma.user.update({
             where:{
-                 id:userId
+                 id:verifyOtp.userId
             },
             data:{
                 verified:true
             }
         })
-        await this.otpService.deleteOtp(userId)
+        console.log(userExist)
+        // delete otp after user have been verified
+        await this.otpService.deleteOtp(verifyOtp.userId)
+        console.log("OTP deleted for user:", verifyOtp.userId);
         return {message:"user email has been verified successfully"}
 
       } catch (error) {
-        throw new BadRequestException("failed to delete the otp")
+        throw new BadRequestException("failed to verify the otp")
       }
     }
 
+
+
+    // resendverification otp
+    async resendOtp(email:string,res){
+     try {
+      const user=await this.prisma.user.findUnique({
+        where:{
+          email
+        },
+        // include: { otp: true },
+  
+      })
+       if(!user) {
+      throw new UnauthorizedException('Invalid details');
+    }
+    console.log("welcome",user)
+      
+    const  existingOtp =await this.prisma.otp.findFirst({
+      where:{
+        userId:user.id
+      }
+    })
+  
+    if( new Date() < new Date(existingOtp.expiry)){
+
+      return {
+        message: 'OTP code is still valid, please use the existing code',
+      };
+    }else{
+        await this.otpService.deleteOtp(existingOtp.id)
+      // return{ message:"otp expired"}
+    }
+  
+       // Send new OTP
+     console.log("Sending new OTP...");
+     await this.otpService.sendOtp(user.id, res);
+     console.log("OTP sent successfully.");
+
+      return {
+       message: 'A new OTP has been sent to your email',
+     };
+    
+     } 
+    catch (error) {
+      console.log(error)
+
+      return res.status(500).json({
+        message: 'An error occurred while resending OTP',
+      });
+     }
+
+  
+}
 
 
 
@@ -106,24 +162,23 @@ export class AuthService {
             throw new UnauthorizedException("invalid credentials")
         }
 
+
+
+        await this.generateToken(user.id)
         return ({message:"user logged in "})
       } catch (error) {
         
       }
     }
 
-    // find user
-    async getUser(userId:number){
-      try {
-        const user =await this.prisma.user.findUnique({
-            where:{
-                id:userId
-            }
-        })
 
-        return user
-      } catch (error) {
-        throw new BadRequestException("user not found")
-      }
+    async generateToken(userId:number){
+     try {
+      const token =this.jwtService.sign({id:userId},{secret:process.env.JWT_SECRET,expiresIn:"2d"})
+      return token
+     } catch (error) {
+      throw new Error("Failed to generate token")
+      
+     }
     }
-}
+  }
